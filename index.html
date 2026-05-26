@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <!-- 适配手机屏幕，禁止手势缩放 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI 土豆兄弟 - 分体完整版</title>
+    <title>AI 土豆兄弟 - 商店迭代版</title>
     <!-- 引入我们下一批次要写的样式表 -->
     <link rel="stylesheet" href="style.css">
 </head>
@@ -17,6 +17,16 @@
         <div id="score">击杀数: 0</div>
     </div>
 
+    <!-- 🚀 新增：三选一商店弹窗 -->
+    <div id="shopModal" class="hidden">
+        <div class="shop-content">
+            <h2>🎉 恭喜升级！请选择一项强化：</h2>
+            <div id="itemContainer">
+                <!-- 这里的内容将由 JavaScript 动态生成 -->
+            </div>
+        </div>
+    </div>
+	
     <!-- 游戏画面渲染画布 -->
     <canvas id="gameCanvas" width="600" height="600"></canvas>
 

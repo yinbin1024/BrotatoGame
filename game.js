@@ -3,6 +3,7 @@ const ctx = canvas.getContext("2d");
 
 // 1. 游戏全局状态初始化
 let gameOver = false;
+let isPaused = false; 
 let score = 0;
 let level = 1;
 let exp = 0;
@@ -18,23 +19,34 @@ const player = {
     maxHp: 100,
     color: "#f39c12", 
     shootCooldown: 30, 
-    shootTimer: 0
+    shootTimer: 0,
+    damage: 1 // 初始攻击力
 };
 
-// 3. 实体存储数组
+// 3. 道具池配置（三选一商店的道具库）
+const shopItems = [
+    { id: "speed", name: "👟 疾行土豆", desc: "移动速度提升 15%", effect: () => { player.speed *= 1.15; } },
+    { id: "atkSpd", name: "⚔️ 疯狂加特林", desc: "射击速度提升 20%", effect: () => { player.shootCooldown = Math.max(6, player.shootCooldown * 0.8); } },
+    { id: "maxHp", name: "🛡️ 防护壳", desc: "生命上限 +25 并补满血", effect: () => { player.maxHp += 25; player.hp = player.maxHp; } },
+    { id: "damage", name: "🔥 尖刺外壳", desc: "子弹伤害提升 1 点", effect: () => { player.damage += 1; } }
+];
+
+// 4. 实体存储数组
 const enemies = [];
 const bullets = [];
 const gems = [];
 
-// 4. 输入控制监听（电脑端键盘）
+// 5. 输入控制监听（电脑端键盘）
 const keys = {};
 window.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
 window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
 
-// 5. 输入控制监听（手机端虚拟摇杆）
+// 6. 输入控制监听（手机端虚拟摇杆）
 let joystick = { active: false, startX: 0, startY: 0, curX: 0, curY: 0, vx: 0, vy: 0 };
 
+
 canvas.addEventListener("touchstart", (e) => {
+    if (isPaused || gameOver) return;
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
@@ -51,7 +63,7 @@ canvas.addEventListener("touchstart", (e) => {
 }, { passive: false });
 
 canvas.addEventListener("touchmove", (e) => {
-    if (!joystick.active) return;
+    if (!joystick.active || isPaused || gameOver) return;
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
@@ -71,13 +83,14 @@ canvas.addEventListener("touchmove", (e) => {
     joystick.vy = dy / maxDist;
 }, { passive: false });
 
+
 canvas.addEventListener("touchend", () => {
     joystick.active = false;
     joystick.vx = 0;
     joystick.vy = 0;
 });
 
-// 6. 玩家位移与自动锁敌射击逻辑
+// 7. 玩家位移与自动锁敌射击逻辑
 function updatePlayer() {
     let dx = 0;
     let dy = 0;
@@ -129,7 +142,48 @@ function updatePlayer() {
         }
     }
 }
-// 7. 敌人生成逻辑
+
+// 8. 🚀 新增：触发三选一商店函数
+function triggerShop() {
+    isPaused = true; // 暂停游戏逻辑
+    
+    const modal = document.getElementById("shopModal");
+    const container = document.getElementById("itemContainer");
+    container.innerHTML = ""; // 清空上一次的道具
+
+    // 随机打乱道具池并挑选前 3 个
+    const shuffled = [...shopItems].sort(() => 0.5 - Math.random());
+    const selectedItems = shuffled.slice(0, 3);
+
+    // 动态创建 3 张道具卡片 UI
+    selectedItems.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "shop-card";
+        card.innerHTML = `
+            <div class="item-name">${item.name}</div>
+            <div class="item-desc">${item.desc}</div>
+        `;
+        
+        // 点击卡片后的核心交互逻辑
+        card.addEventListener("click", () => {
+            item.effect(); // 执行道具对应的增强加成
+            
+            // 更新看板数据
+            document.getElementById("hp").innerText = `生命值: ${Math.floor(player.hp)}/${player.maxHp}`;
+            document.getElementById("level").innerText = `等级: ${level} (EXP: ${exp}/${expNeeded})`;
+            
+            modal.classList.add("hidden"); // 隐藏商店弹窗
+            isPaused = false; // 恢复游戏运行
+            gameLoop(); // 重新唤醒游戏主循环
+        });
+        
+        container.appendChild(card);
+    });
+
+    modal.classList.remove("hidden"); // 显示商店弹窗
+}
+
+// 9. 敌人生成逻辑
 let enemyTimer = 0;
 function spawnEnemies() {
     enemyTimer++;
@@ -153,9 +207,9 @@ function spawnEnemies() {
     }
 }
 
-// 8. 游戏主循环（核心物理与渲染）
+// 10. 游戏主循环（核心物理与渲染）
 function gameLoop() {
-    if (gameOver) return;
+     if (gameOver || isPaused) return; // 如果游戏结束或处于暂停（打开商店）状态，直接拦截退出
 
     // 清空画面
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -187,11 +241,13 @@ function gameLoop() {
                 level++;
                 exp = 0;
                 expNeeded = Math.floor(expNeeded * 1.5);
-                player.shootCooldown = Math.max(8, player.shootCooldown - 3); // 射速变快
-                player.hp = Math.min(player.maxHp, player.hp + 20); // 升级回血
-            }
-            document.getElementById("level").innerText = `等级: ${level} (EXP: ${exp}/${expNeeded})`;
-            document.getElementById("hp").innerText = `生命值: ${player.hp}/${player.maxHp}`;
+				
+                // 🚀 核心改动：不再直接升级，而是触发三选一商店
+                triggerShop();
+           } else {
+                // 如果没有升级，只更新经验文本看板
+                document.getElementById("level").innerText = `等级: ${level} (EXP: ${exp}/${expNeeded})`;
+           }
         }
     }
 
@@ -217,7 +273,10 @@ function gameLoop() {
             let e = enemies[j];
             if (Math.hypot(b.x - e.x, b.y - e.y) < b.size + e.size) {
                 bullets.splice(i, 1);
-                e.hp--;
+				
+               // 🚀 核心改动：敌人受到的伤害由 player.damage 动态决定
+                e.hp -= player.damage; 
+				
                 if (e.hp <= 0) {
                     gems.push({ x: e.x, y: e.y, size: 4 }); // 爆出经验石
                     enemies.splice(j, 1);
@@ -277,5 +336,5 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-// 9. 启动游戏
+// 11. 启动游戏
 gameLoop();
