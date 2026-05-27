@@ -1,21 +1,32 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <!-- 适配手机屏幕，禁止手势缩放 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI 土豆兄弟 - 商店迭代版</title>
-    <!-- 引入我们下一批次要写的样式表 -->
+    <title>AI 土豆兄弟 - 无尽首领战完整版</title>
+    <!-- 引入样式表 -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- 顶部数据看板 -->
+    <!-- 🟢 核心修复：新增顶部 Boss 巨型血条 UI 容器（game.js 依赖此标签控制显示与血量更新） -->
+    <div id="bossHealthContainer" class="hidden">
+        <div class="boss-title">⚠️ 终极恶魔首领 ⚠️</div>
+        <div class="boss-bar-bg">
+            <div id="bossHpBar"></div>
+        </div>
+    </div>
+
+    <!-- 正常数据看板 -->
     <div id="ui">
         <div id="hp">生命值: 100/100</div>
         <div id="level">等级: 1 (EXP: 0/5)</div>
         <div id="score">击杀数: 0</div>
     </div>
+
+    <!-- 游戏画面渲染画布 -->
+    <canvas id="gameCanvas" width="600" height="600"></canvas>
 
     <!-- 三选一商店弹窗 -->
     <div id="shopModal" class="hidden">
@@ -26,11 +37,8 @@
             </div>
         </div>
     </div>
-	
-    <!-- 游戏画面渲染画布 -->
-    <canvas id="gameCanvas" width="600" height="600"></canvas>
 
-    <!-- 引入我们最后要写的核心游戏逻辑脚本 -->
+    <!-- 引入核心游戏逻辑脚本 -->
     <script src="game.js"></script>
 </body>
 </html>

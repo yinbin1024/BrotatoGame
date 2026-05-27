@@ -37,7 +37,50 @@ canvas {
     border-radius: 12px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
     max-width: 95vw;
-    max-height: 75vh;
+    max-height: 70vh; /* 🚀 压缩了 5vh，留给顶部 Boss 血条，防止画面超出屏幕 */
+}
+
+/* 🟢 核心修复：Boss 血条主容器样式 */
+#bossHealthContainer {
+    width: 90vw;
+    max-width: 580px;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+/* 🟢 核心修复：带呼吸警告闪烁的 Boss 名字 */
+.boss-title {
+    color: #e74c3c;
+    font-weight: bold;
+    font-size: 16px;
+    margin-bottom: 4px;
+    text-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+    animation: blink 1.5s infinite; /* 绑定下方的闪烁动画 */
+}
+
+/* 🟢 核心修复：Boss 血条深色外壳 */
+.boss-bar-bg {
+    width: 100%;
+    height: 16px;
+    background: #34495e;
+    border: 2px solid #c0392b;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+}
+
+/* 🟢 核心修复：紫红渐变的恶魔能量条 */
+#bossHpBar {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #9b59b6, #e74c3c); 
+    transition: width 0.1s ease-out; /* 让掉血动画更平滑滑顺 */
+}
+
+/* 🟢 核心修复：警告闪烁的数学动画帧 */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
 }
 
 /* 控制显示隐藏的工具类 */
@@ -45,7 +88,7 @@ canvas {
     display: none !important;
 }
 
-/* 🚀 新增：全屏半透明商店背景 */
+/* 全屏半透明商店背景 */
 #shopModal {
     position: fixed;
     top: 0;
