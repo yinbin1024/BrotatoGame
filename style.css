@@ -40,7 +40,7 @@ canvas {
     max-height: 75vh;
 }
 
-/* 🚀 新增：控制显示隐藏的工具类 */
+/* 控制显示隐藏的工具类 */
 .hidden {
     display: none !important;
 }
@@ -59,7 +59,7 @@ canvas {
     z-index: 100;
 }
 
-/* 🚀 新增：商店弹窗主面板 */
+/* 商店弹窗主面板 */
 .shop-content {
     background: #2c3e50;
     padding: 30px;
@@ -76,7 +76,7 @@ canvas {
     font-size: 22px;
 }
 
-/* 🚀 新增：三个道具卡片的容器 */
+/* 三个道具卡片的容器 */
 #itemContainer {
     display: flex;
     gap: 20px;
@@ -85,7 +85,7 @@ canvas {
     justify-content: center;
 }
 
-/* 🚀 新增：单张道具卡片样式 */
+/* 单张道具卡片样式 */
 .shop-card {
     background: #34495e;
     padding: 20px;
@@ -97,7 +97,7 @@ canvas {
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
 
-/* 🚀 新增：鼠标悬停或手指触碰卡片特效 */
+/* 鼠标悬停或手指触碰卡片特效 */
 .shop-card:hover {
     transform: scale(1.05);
     border-color: #f1c40f;

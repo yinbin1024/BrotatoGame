@@ -9,7 +9,7 @@ let level = 1;
 let exp = 0;
 let expNeeded = 5;
 
-// 2. 玩家（土豆）属性
+// 2. 玩家（土豆）属性（🚀 新增 gunType 属性，默认为单发 'pistol'）
 const player = {
     x: canvas.width / 2,
     y: canvas.height / 2,
@@ -20,15 +20,27 @@ const player = {
     color: "#f39c12", 
     shootCooldown: 30, 
     shootTimer: 0,
-    damage: 1 // 初始攻击力
+    damage: 1, // 初始攻击力
+	gunType: "pistol" // 初始武器：手枪。后续可升级为 'shotgun'（散弹枪）
 };
 
-// 3. 道具池配置（三选一商店的道具库）
+// 3. 道具池配置（🚀 新增：散弹枪改装卷轴，几率出现在三选一中）
 const shopItems = [
     { id: "speed", name: "👟 疾行土豆", desc: "移动速度提升 15%", effect: () => { player.speed *= 1.15; } },
     { id: "atkSpd", name: "⚔️ 疯狂加特林", desc: "射击速度提升 20%", effect: () => { player.shootCooldown = Math.max(6, player.shootCooldown * 0.8); } },
     { id: "maxHp", name: "🛡️ 防护壳", desc: "生命上限 +25 并补满血", effect: () => { player.maxHp += 25; player.hp = player.maxHp; } },
-    { id: "damage", name: "🔥 尖刺外壳", desc: "子弹伤害提升 1 点", effect: () => { player.damage += 1; } }
+    { id: "damage", name: "🔥 尖刺外壳", desc: "子弹伤害提升 1 点", effect: () => { player.damage += 1; } },
+    { 
+        id: "shotgun", 
+        name: "💥 散弹枪改装", 
+        desc: "每次攻击喷射 3 发散射子弹", 
+        effect: () => { 
+            player.gunType = "shotgun"; 
+            // 🚀 新增：选完之后，顺手把自己从商店道具池(shopItems)中彻底剔除
+            const index = shopItems.findIndex(item => item.id === "shotgun");
+            if (index !== -1) shopItems.splice(index, 1);
+        } 
+    }
 ];
 
 // 4. 实体存储数组
@@ -90,7 +102,7 @@ canvas.addEventListener("touchend", () => {
     joystick.vy = 0;
 });
 
-// 7. 玩家位移与自动锁敌射击逻辑
+// 7. 🚀 玩家位移与散射矩阵弹道算法
 function updatePlayer() {
     let dx = 0;
     let dy = 0;
@@ -130,20 +142,37 @@ function updatePlayer() {
         }
 
         if (nearestEnemy) {
-            let angle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
-            bullets.push({
-                x: player.x,
-                y: player.y,
-                vx: Math.cos(angle) * 7,
-                vy: Math.sin(angle) * 7,
-                size: 4
-            });
+            // 计算锁定敌人的基础角度
+            let baseAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
+            
+            if (player.gunType === "shotgun") {
+                // 🚀 散弹枪模式：同时发射 3 发子弹（中间一发，左右各偏转 0.2 弧度）
+                const angles = [baseAngle - 0.2, baseAngle, baseAngle + 0.2];
+                angles.forEach(angle => {
+                    bullets.push({
+                        x: player.x,
+                        y: player.y,
+                        vx: Math.cos(angle) * 7,
+                        vy: Math.sin(angle) * 7,
+                        size: 4
+                    });
+                });
+            } else {
+                // 普通手枪模式：单发子弹
+                bullets.push({
+                    x: player.x,
+                    y: player.y,
+                    vx: Math.cos(baseAngle) * 7,
+                    vy: Math.sin(baseAngle) * 7,
+                    size: 4
+                });
+            }
             player.shootTimer = 0;
         }
     }
 }
 
-// 8. 🚀 新增：触发三选一商店函数
+// 8. 触发三选一商店函数
 function triggerShop() {
     isPaused = true; // 暂停游戏逻辑
     
@@ -242,7 +271,7 @@ function gameLoop() {
                 exp = 0;
                 expNeeded = Math.floor(expNeeded * 1.5);
 				
-                // 🚀 核心改动：不再直接升级，而是触发三选一商店
+                // 触发三选一商店
                 triggerShop();
            } else {
                 // 如果没有升级，只更新经验文本看板
@@ -274,7 +303,7 @@ function gameLoop() {
             if (Math.hypot(b.x - e.x, b.y - e.y) < b.size + e.size) {
                 bullets.splice(i, 1);
 				
-               // 🚀 核心改动：敌人受到的伤害由 player.damage 动态决定
+               // 敌人受到的伤害
                 e.hp -= player.damage; 
 				
                 if (e.hp <= 0) {
