@@ -35,7 +35,11 @@ const player = {
     pierceChance: 0.00,     // 穿透率（选一次变35%，选三次变105%转化为必定穿透1次+下一个怪5%概率穿透）
     isNova: false,          // 是否解锁暴击全向散弹
     novaProjectiles: 2,     // 🟢 确保初始为 2，代表第 1 次选红装时触发 1 分 2 分裂
-    ignoreICD: false    
+	// 🚀 新增：環繞飛刀被動武器矩陣參數
+    hasKnife: false,        // 初始為 false，擊敗 3 代 Boss 後自動永久解鎖變為 true
+    knifeCount: 0,          // 初始 0 把，擊敗 Boss 送 1 把，之後在商店抽取堆疊
+    knifeAngle: 0,          // 飛刀旋轉的公共角度
+    knifeSpawnTimer: 0      // 飛刀碎裂後自動凝聚的倒計時
 };
 
 // 3. 🚀 动态进化道具池（完全重构：普通与史诗无任何数值和属性重叠，全部可无限次重复抽取！）
@@ -54,7 +58,6 @@ const shopItems = [
             player.baseProjectiles += 1; 
         } 
     },
-
     // 👑 红色史诗词条：零数值重叠！全面转化为机制突变与无限维度叠加
     { 
         id: "epic_pierce", 
@@ -92,6 +95,7 @@ const enemies = [];
 const bullets = [];
 const gems = [];
 const numbers = []; // 存放空中飘浮的伤害/治愈数字对象
+const knives = []; // 🚀 新增：存放所有當前圍繞在主角身邊旋轉的飛刀對象
 
 // 5. 输入控制监听（电脑键盘）
 const keys = {};
@@ -363,13 +367,15 @@ function spawnEnemies() {
         if (isEliteUnlocked && Math.random() < 0.3) {
             enemies.push({
                 type: "elite", x: x, y: y, size: 20,
-                speed: 1.4 + (currentLoop * 0.1), hp: 4 * currentLoop, color: "#3498db",
+				// 🚀 核心修改：使用 Math.sqrt 曲线，让怪物速度在中后期（如15轮以上）平缓增长，不再无限狂飙
+                speed: 1.4 + (Math.sqrt(currentLoop) * 0.12), hp: 4 * currentLoop, color: "#3498db",
                 state: "walk", timer: 0, dashVx: 0, dashVy: 0
             });
         } else {
             enemies.push({
                 type: "normal", x: x, y: y, size: 10,
-                speed: 1.2 + (currentLoop * 0.1), hp: 1 + Math.floor(currentLoop / 2), color: "#e74c3c",
+				// 🚀 核心修改：使用 Math.sqrt 曲线，防止小怪在中后期速度碾压玩家导致甩不掉
+                speed: 1.2 + (Math.sqrt(currentLoop) * 0.12), hp: 1 + Math.floor(currentLoop / 2), color: "#e74c3c",
                 state: "walk", timer: 0, dashVx: 0, dashVy: 0
             });
         }
@@ -394,6 +400,120 @@ function gameLoop() {
 
     updatePlayer();
     spawnEnemies();
+
+    // 🚀 1. 飞刀自动凝聚管理逻辑
+    if (player.hasKnife) {
+        // 如果当前场上的飞刀数量不足玩家拥有的 knifeCount，且重新凝聚计时器不在冷却中，则开启计时
+        if (knives.length < player.knifeCount && player.knifeSpawnTimer <= 0) {
+            player.knifeSpawnTimer = 90; // 设定 1.5 秒（90帧）的重新凝聚冷却时间
+        }
+
+        if (player.knifeSpawnTimer > 0) {
+            player.knifeSpawnTimer--;
+            if (player.knifeSpawnTimer <= 0) {
+                // 冷却结束，一次性补全所有缺失的护身飞刀
+                while (knives.length < player.knifeCount) {
+                    knives.push({
+                        damage: player.damage, // 继承玩家此时此刻最新的基础攻击力
+                        color: "#9b59b6"        // 高贵的紫色飞刀
+                    });
+                }
+            }
+        }
+
+        // 2. 飞刀行星带公共偏转角度每帧递增（控制旋转速度）
+        player.knifeAngle += 0.04; 
+    }
+
+    // 🚀 3. 解算环绕飞刀的 360 度行星等分空间坐标与渲染
+    if (player.hasKnife && knives.length > 0) {
+        const count = knives.length;
+        const radius = 60; // 飞刀围绕土豆旋转的固定半乘半径
+
+        for (let i = count - 1; i >= 0; i--) {
+            let k = knives[i];
+            
+            // 核心数学公式：根据当前索引在 360 度内进行完美均分，并叠加公共偏转角
+            let angle = player.knifeAngle + ((Math.PI * 2) / count) * i;
+            let knifeX = player.x + Math.cos(angle) * radius;
+            let knifeY = player.y + Math.sin(angle) * radius;
+
+            // 绘制飞刀实体（呈现紫色飞边的小锐角圆形）
+            ctx.save();
+            ctx.fillStyle = k.color;
+            ctx.shadowColor = "#9b59b6";
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(knifeX, knifeY, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // 🚀 4. 飞刀触敌命中与能量守恒衰减矩阵判定
+            // 只有当游戏没有打开商店且没有结束时，飞刀才在后台进行高频切怪判定
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                let e = enemies[j];
+                // 设定飞刀的判定半径和敌人的半径碰撞
+                if (Math.hypot(knifeX - e.x, knifeY - e.y) < 6 + e.size) {
+                    
+                    // 飞刀对怪造成当前携带的伤害（飞刀不触发暴击与普通吸血）
+                    let currentDamage = k.damage;
+                    e.hp -= currentDamage;
+
+                    // 弹出白色小伤害数字飘字
+                    numbers.push({
+                        x: e.x, y: e.y - e.size,
+                        text: Math.floor(currentDamage),
+                        isCrit: false, life: 25, vx: (Math.random() * 2 - 1) * 0.5, vy: -1
+                    });
+
+                    // 实时同步更新 Boss 头顶血条
+                    if (e.type === "boss") {
+                        updateBossBar(e.hp, e.maxHp);
+                    }
+
+                    // 怪物死亡判定链（与子弹命中后的销毁规则完美打通）
+                    if (e.hp <= 0) {
+                        if (e.type === "boss") {
+                            bossActive = false; lastBossKills = score; bossCounter++;         
+                            const bossContainer = document.getElementById("bossHealthContainer");
+                            if (bossContainer) bossContainer.classList.add("hidden");
+                            for (let m = 0; m < 20; m++) {
+                                gems.push({ x: e.x + (Math.random() * 60 - 30), y: e.y + (Math.random() * 60 - 30), size: 6, value: 3, color: "#f1c40f" });
+                            }
+                            invincibleTimer = 180; player.color = "#f1c40f"; 
+                            setTimeout(() => { triggerShop(true); }, 20); 
+                        } else if (e.type === "elite") {
+                            gems.push({ x: e.x, y: e.y, size: 6, value: 3, color: "#f1c40f" }); 
+                            for (let m = 0; m < 2; m++) {
+                                enemies.push({ type: "spider", x: e.x + (m === 0 ? -10 : 10), y: e.y, size: 6, speed: 2.8, hp: 1, color: "#e67e22" });
+                            }
+                        } else {
+                            gems.push({ x: e.x, y: e.y, size: 4, value: 1, color: "#2ecc71" });
+                        }
+                        enemies.splice(j, 1); score++;
+                        document.getElementById("score").innerText = "击杀数: " + score;
+                    }
+
+                    // 🚀 5. 核心规则：飞刀每切割中一次，其自身携带的攻击力【永久衰减 30%】
+                    k.damage *= 0.70;
+
+                    // 🚀 6. 数值底线熔断：如果该飞刀攻击力因为连续疯狂切割已经【小于 1】
+                    if (k.damage < 1) {
+                        // 该飞刀当场力竭、解体碎裂，从场上移除
+                        knives.splice(i, 1);
+                        
+                        // 顺手往数字飘字池压入一个碎裂标志增加物理破碎反馈
+                        numbers.push({
+                            x: knifeX, y: knifeY, text: "✨ SHATTER!",
+                            isCrit: false, life: 20, vx: 0, vy: -0.5
+                        });
+                        
+                        break; // 这一把飞刀已经碎了，立刻退出怪群判定，防止发生句柄越界
+                    }
+                }
+            }
+        }
+    }
 
     // 【逻辑 A】经验石绘制与磁性吸附
     for (let i = gems.length - 1; i >= 0; i--) {
@@ -534,8 +654,37 @@ function gameLoop() {
 
                 // 怪物死亡判定链（维持原样）
                 if (e.hp <= 0) {
-                    if (e.type === "boss") {
-                        bossActive = false; lastBossKills = score; bossCounter++;         
+					if (e.type === "boss") {
+                        // [Boss 斩首狂欢处理]
+                        bossActive = false;
+                        lastBossKills = score; 
+                        
+                        // 🚀 核心修复：判定当前被斩杀的是否是第 3 代 Boss
+                        if (e.generation === 3 && !player.hasKnife) {
+                            player.hasKnife = true;
+                            player.knifeCount = 1; // 初始免费获得 1 把环绕飞刀
+                            
+                            // 🟢 核心修复：只有在此高光时刻，才真正把“飞刀增幅”词条放进总奖池！
+                            // 此时才允许后续普通升级商店随机抽到它，在源头上斩断了前期乱入的 Bug
+                            shopItems.push({
+                                id: "knife_add_1",
+                                name: "🗡️ 飞刀增幅卷轴",
+                                desc: "第二武器增强：使围绕在身边的环绕飞刀数量永久 +1！",
+                                effect: () => {
+                                    player.knifeCount += 1; // 因为解禁了，所以不需要再做 if 判断，直接无限堆叠
+                                }
+                            });
+
+                            // 弹出史诗成就解锁提示
+                            numbers.push({
+                                x: player.x, y: player.y - player.size - 20,
+                                text: "⚔️ 解锁第二武器：环绕飞刀！",
+                                isCrit: true, life: 90, vx: 0, vy: -0.5
+                            });
+                        }
+
+                        bossCounter++; // Boss 代数递增
+
                         const bossContainer = document.getElementById("bossHealthContainer");
                         if (bossContainer) bossContainer.classList.add("hidden");
                         for (let k = 0; k < 20; k++) {
@@ -603,9 +752,14 @@ function gameLoop() {
                     e.timer = 0;
                 }
             } else if (e.state === "charge") {
+                // 2. 原地蓄力状态（此时怪完全锁死不能动，外观渲染红光警示）
+                e.timer++;
+                // 锁定冲刺发射的方向向量
                 let angle = Math.atan2(player.y - e.y, player.x - e.x);
-                e.dashVx = Math.cos(angle) * (e.speed * 3.5); 
-                e.dashVy = Math.sin(angle) * (e.speed * 3.5);
+                // 🚀 核心微调：将怪物的爆发冲刺速度从不讲理的 3.5 倍下调至更合理的 2.2 倍，给不选移速词条的流派留出变向闪避的身位
+                e.dashVx = Math.cos(angle) * (e.speed * 2.2); 
+                e.dashVy = Math.sin(angle) * (e.speed * 2.2);
+
                 if (e.timer > 35) { 
                     e.state = "dash";
                     e.timer = 0;
