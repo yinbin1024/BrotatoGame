@@ -562,11 +562,55 @@ function gameLoop() {
                     });
                 }
 
-                // 正常执行升级、扣除经验、跨越等级和推开商店逻辑（维持原样）
+				// 正常执行升级、扣除经验、跨越等级
                 level++;
                 exp = 0;
                 expNeeded = Math.floor(expNeeded * 1.5);
+
+                // 🚀 新增增量逻辑：每 10 级整点自动触发【全属性爆发 ＋ 隐藏机制觉醒】
+                // 因为上面已经执行了 level++，所以如果刚升完级达到了 11 级、21 级、31 级，代表刚刚跨过了 10 级的坎
+                let reachedLevel = level - 1; 
+                if (reachedLevel > 0 && reachedLevel % 10 === 0) {
+                    
+                    // 1. 基础属性全面爆发大满贯
+                    player.speed *= 1.08;      // ⚡ 移动速度永久加 8%
+                    player.damage += 2;        // ⚔️ 基础伤害永久加 2 点
+                    player.critRate = Math.min(1.0, player.critRate + 0.05); // 🎯 暴击率永久加 5%
+                    player.leechRate = Math.min(0.25, player.leechRate + 0.02); // 🧛 吸血概率永久加 2%
+
+                    // 2. 隐藏独立机制分阶段解锁
+                    if (reachedLevel === 10) {
+                        player.magnetRange = 100; // 🔮 10级隐藏特权：磁铁吸附半径从 50 永久翻倍到 100 像素！
+                    } else if (reachedLevel === 20) {
+                        player.shootCooldown = Math.max(4, player.shootCooldown * 0.85); // 🔮 20级隐藏特权：开火攻速永久暴涨 15%！
+                    } else if (reachedLevel === 30 && player.hasKnife) {
+                        // 🔮 30级隐藏特权：如果拥有飞刀，飞刀旋转速度和凝聚冷却缩短 30%
+                        player.knifeSpawnTimer = Math.max(30, player.knifeSpawnTimer - 30); 
+                    }
+
+                    // 3. 在空中向数字飘字池喷射一连串彩色高光文字，仪式感和正向反馈直接拉满！
+                    numbers.push({
+                        x: player.x, y: player.y - player.size - 25,
+                        text: `✨ LEVEL ${reachedLevel} AWAKENING! ✨`,
+                        isCrit: true, life: 70, vx: 0, vy: -0.6
+                    });
+                    numbers.push({
+                        x: player.x - 30, y: player.y - player.size,
+                        text: "⚔️ 伤害+2", isCrit: false, life: 50, vx: -0.5, vy: -1
+                    });
+                    numbers.push({
+                        x: player.x, y: player.y - player.size,
+                        text: "⚡ 移速+8%", isCrit: false, life: 50, vx: 0, vy: -1.3
+                    });
+                    numbers.push({
+                        x: player.x + 30, y: player.y - player.size,
+                        text: "🧛 吸血+2%", isCrit: false, life: 50, vx: 0.5, vy: -1, isHeal: true // 借用绿色渲染
+                    });
+                }
+
+                // 正常推开商店逻辑
                 triggerShop(false);
+
             } else {
                 document.getElementById("level").innerText = `等级: ${level} (EXP: ${exp}/${expNeeded})`;
             }
