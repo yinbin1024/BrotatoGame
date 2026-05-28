@@ -8,13 +8,13 @@ let score = 0;
 let level = 1;
 let exp = 0;
 let expNeeded = 5;
-let currentLoop = 1; // 当前循环大波次
+let currentLoop = 1;        // 当前循环大波次（每60斩升级一次难度）
 let lastBossKills = 0;      // 记录上一次击杀 Boss 时的击杀数
 let killsSinceLastBoss = 0; // 自上一次击杀 Boss 以来新杀的怪物数
 let bossCounter = 1;        // Boss 登场的代数（第1只，第2只...）
-let invincibleTimer = 0;    // 🚀 新增：暴走无敌状态倒计时（帧数）
+let invincibleTimer = 0;    // 暴走无敌状态倒计时（帧数）
 
-// 2. 玩家（土豆）属性（🚀 新增 critRate 暴击与 leechRate 吸血属性）
+// 2. 🚀 玩家（土豆）核心属性面板
 const player = {
     x: canvas.width / 2,
     y: canvas.height / 2,
@@ -27,61 +27,71 @@ const player = {
     shootTimer: 0,
     damage: 1,
     gunType: "pistol",
-    baseProjectiles: 3,
-    critRate: 0.10, // 🚀 初始暴击率 10%
-    leechRate: 0.00,  // 🚀 初始吸血率 0%
-	lastLeechTime: 0 // 🚀 记录上一次吸血成功的游戏帧数，用于限制回血频率
+    baseProjectiles: 1,     // 初始手枪弹道数为 1 发
+    critRate: 0.10,         // 初始暴击率 10%
+    leechRate: 0.00,        // 初始吸血率 0%
+    lastLeechTime: 0,       // 记录上一次吸血成功的游戏时间，用于 ICD 冷却判定
+    // 👑 史诗专属机制深度升级变量
+    pierceChance: 0.00,     // 穿透率（选一次变35%，选三次变105%转化为必定穿透1次+下一个怪5%概率穿透）
+    isNova: false,          // 是否解锁暴击全向散弹
+    novaProjectiles: 2,     // 🟢 确保初始为 2，代表第 1 次选红装时触发 1 分 2 分裂
+    ignoreICD: false    
 };
 
-// 3. 动态进化道具池（🚀 扩充：加入暴击针与吸血牙齿）
+// 3. 🚀 动态进化道具池（完全重构：普通与史诗无任何数值和属性重叠，全部可无限次重复抽取！）
 const shopItems = [
-    { id: "speed", name: "👟 疾行土豆", desc: "移动速度提升 15%", effect: () => { player.speed *= 1.15; } },
-    { id: "atkSpd", name: "⚔️ 疯狂加特林", desc: "射击速度提升 20%", effect: () => { player.shootCooldown = Math.max(6, player.shootCooldown * 0.8); } },
-    { id: "maxHp", name: "🛡️ 防护壳", desc: "生命上限 +25 并补满血", effect: () => { player.maxHp += 25; player.hp = player.maxHp; } },
-    { id: "damage", name: "🔥 尖刺外壳", desc: "子弹伤害提升 1 点", effect: () => { player.damage += 1; } },
-    { 
+    // ⚪ 普通白色词条：纯粹的基础属性增量、百分比即时气血补给
+    { id: "speed", name: "👟 疾行步伐", desc: "移动速度平稳提升 10%", effect: () => { player.speed *= 1.10; } },
+    { id: "damage", name: "🔥 尖刺外壳", desc: "基础攻击力稳步提升 1 点", effect: () => { player.damage += 1; } }, 
+    { id: "crit", name: "🎯 鹰眼准星", desc: "暴击率稳步提升 10%", effect: () => { player.critRate = Math.min(1.0, player.critRate + 0.10); } },
+	{ id: "atkSpd", name: "⚔️ 运转齿轮", desc: "基础射击速度提升 10%！(缩短 10% 射击冷却，可无限叠加)", effect: () => { player.shootCooldown = Math.max(4, player.shootCooldown * 0.90); } },
+	{ 
         id: "shotgun", 
         name: "💥 散弹枪改装", 
-        desc: "未解锁时激活散弹；已解锁则使散弹枪弹道数永久 +1！", 
+        desc: "打破单发限制！每次选择均使全武器的攻击弹道数量永久 +1！", 
         effect: () => { 
-            if (player.gunType !== "shotgun") {
-                player.gunType = "shotgun";
-            } else {
-                player.baseProjectiles += 1;
-            }
+            player.gunType = "shotgun"; 
+            player.baseProjectiles += 1; 
         } 
     },
-    // 🚀 新增暴击和吸血购买选项：
-    { id: "crit", name: "🎯 鹰眼准星", desc: "暴击率永久提升 15%", effect: () => { player.critRate = Math.min(1.0, player.critRate + 0.15); } },
-	{ 
+
+    // 👑 红色史诗词条：零数值重叠！全面转化为机制突变与无限维度叠加
+    { 
         id: "epic_pierce", 
-        name: "👑 [史诗] 穿透弹头", 
-        desc: "子弹体积变大，且伤害永久提升 3 点！(可无限叠加)", 
-        effect: () => { player.damage += 3; } 
+        name: "👑 [史诗] 毁灭穿透机制", 
+        desc: "子弹获得穿透异能：穿透率提升 35%！(当穿透率超过 100% 时，将永久转化为【必定穿透次数 +1】并无限叠加！)", 
+        effect: () => { player.pierceChance += 0.35; } 
+    },
+    {
+        id: "epic_titan",
+        name: "👑 [史诗] 泰坦巨神之血",
+        desc: "生命质变：生命上限永久暴涨 +20 点，并瞬间回满全部气血！(可无限叠加)", 
+        effect: () => { player.maxHp += 20; player.hp = player.maxHp; } 
+    },
+    {
+        id: "epic_nova",
+        name: "👑 [史诗] 恶魔裂变弹头", // 🚀 更名：从全向爆裂升级为裂变
+        desc: "子弹触发暴击时，将以【被击中的怪】为中心向四周爆散分裂！初始 1 分 2，后续每重复选择一次，分裂子弹数永久 +1！",
+        effect: () => { 
+            player.isNova = true; 
+            player.novaProjectiles += 1; // 🚀 机制重构：每次复选，裂变个数 +1（初始是1分2，再选变1分3，1分4...）
+        } 
     },
     { 
         id: "epic_vampire", 
-        name: "👑 [史诗] 恶魔狂热", 
-        desc: "吸血概率提升 1%，且生命上限 +20！(吸血绝对上限 25%)", 
-        effect: () => { player.leechRate = Math.min(0.25, player.leechRate + 0.01); player.maxHp += 20; player.hp = Math.min(player.maxHp, player.hp + 20); } 
+        name: "👑 [史诗] 鲜血始祖禁术", 
+        desc: "吸血禁术觉醒：吸血概率永久大幅提升 4%！(可无限重复选择，吸血绝对上限 25%)", 
+        effect: () => { 
+            player.leechRate = Math.min(0.25, player.leechRate + 0.04); 
+        } 
     }
 ];
-// 在原本追加史诗道具的地方，为史诗吸血设置绝对上限保护：
-const epicVampireItem = shopItems.find(item => item.id === "epic_vampire");
-if (epicVampireItem) {
-    epicVampireItem.desc = "吸血概率提升 1%，且生命上限 +20！(吸血上限 25%)";
-    epicVampireItem.effect = () => { 
-        player.leechRate = Math.min(0.25, player.leechRate + 0.08); // 🚀 锁死吸血率最高只能堆到 25%
-        player.maxHp += 20; 
-        player.hp = Math.min(player.maxHp, player.hp + 20); 
-    };
-}
 
 // 4. 游戏实体容器
 const enemies = [];
 const bullets = [];
 const gems = [];
-const numbers = []; // 存放所有正在空中漂浮的伤害数字对象
+const numbers = []; // 存放空中飘浮的伤害/治愈数字对象
 
 // 5. 输入控制监听（电脑键盘）
 const keys = {};
@@ -134,7 +144,8 @@ canvas.addEventListener("touchend", () => {
     joystick.vx = 0;
     joystick.vy = 0;
 });
-// 7. 🚀 玩家位移与无限叠加散射矩阵弹道算法
+
+// 7. 🚀 玩家位移与散射矩阵弹道算法（注入了 pierceCount 穿透未初始化标记 `-1`）
 function updatePlayer() {
     let dx = 0;
     let dy = 0;
@@ -177,56 +188,68 @@ function updatePlayer() {
             let baseAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
             
             if (player.gunType === "shotgun") {
-                // 🚀 散弹枪无限叠加算法：根据弹道总数计算扇形夹角间隔
                 const count = player.baseProjectiles;
-                const spread = 0.18; // 每发子弹之间的弧度间隔
+                const spread = 0.18; 
                 const startAngle = baseAngle - ((count - 1) * spread) / 2;
 
                 for (let i = 0; i < count; i++) {
                     let angle = startAngle + i * spread;
                     bullets.push({
-                        x: player.x,
-                        y: player.y,
-                        vx: Math.cos(angle) * 7,
-                        vy: Math.sin(angle) * 7,
-                        size: 4
+                        x: player.x, y: player.y,
+                        vx: Math.cos(angle) * 7, vy: Math.sin(angle) * 7,
+                        size: 4, pierceCount: -1, // 🚀 标记穿透生命周期
+						damage: player.damage // 🚀 新增：让刚射出来的子弹带上你当时的真实基础攻击力
                     });
                 }
             } else {
-                // 普通手枪模式
                 bullets.push({
-                    x: player.x,
-                    y: player.y,
-                    vx: Math.cos(baseAngle) * 7,
-                    vy: Math.sin(baseAngle) * 7,
-                    size: 4
+                    x: player.x, y: player.y,
+                    vx: Math.cos(baseAngle) * 7, vy: Math.sin(baseAngle) * 7,
+                    size: 4, pierceCount: -1, // 🚀 标记穿透生命周期
+					damage: player.damage // 🚀 新增：让刚射出来的子弹带上你当时的真实基础攻击力
                 });
             }
             player.shootTimer = 0;
         }
     }
 }
-
-// 8. 重构商店抽取逻辑：彻底隔离普通道具与史诗道具
+// 8. 🚀 重构商店抽取逻辑：整点升级触发三选二，击败 Boss 维持三选一
 function triggerShop(isBossShop = false) {
     isPaused = true;
     const modal = document.getElementById("shopModal");
     const container = document.getElementById("itemContainer");
     container.innerHTML = "";
 
-    // 🚀 核心修复：从总池子中，用代码把史诗和普通道具强行剥离成两个独立的干粮袋
+    // 🚀 核心修正：精准剥离判定
+    // 只有当“不是 Boss 商店”且“当前等级是 5 的倍数”时，才给 2 次购买额度；Boss 商店或普通升级固定为 1 次
+    let maxSelect = (!isBossShop && level % 5 === 0) ? 2 : 1;
+    let selectedCount = 0; // 记录玩家在当前货架上已经点击购买了多少件
+
+    // 动态调整弹窗顶部的标题文字，给予玩家精准的视觉反馈
+    const shopTitle = modal.querySelector("h2");
+    if (shopTitle) {
+        if (!isBossShop && level % 5 === 0) {
+            shopTitle.innerHTML = `🎉 <span style="color: #f1c40f;">【整点特惠】</span>恭喜升至 ${level} 级！请选择 <span style="color: #e74c3c; font-size: 24px;">2</span> 项强化：`;
+        } else if (isBossShop) {
+            shopTitle.innerHTML = `👑 <span style="color: #9b59b6;">【首领斩首狂欢】</span>请极其慎重地选择 <span style="color: #f1c40f; font-size: 24px;">1</span> 项史诗强化：`;
+        } else {
+            shopTitle.innerHTML = `🎉 恭喜升级！请选择 1 项强化：`;
+        }
+    }
+
+    // 从总池子中精准剥离普通和史诗道具
     const epics = shopItems.filter(item => item.id.startsWith("epic_"));
     const normals = shopItems.filter(item => !item.id.startsWith("epic_"));
 
     let selectedItems = [];
 
     if (isBossShop) {
-        // 👑 Boss 专属商店：打乱后，强行精准抽取 1 个史诗 + 2 个普通
+        // Boss 专属商店：固定抽取 1 个红色史诗机制 + 2 个普通词条
         const shuffledEpics = [...epics].sort(() => 0.5 - Math.random());
         const shuffledNormals = [...normals].sort(() => 0.5 - Math.random());
         selectedItems = [shuffledEpics[0], ...shuffledNormals.slice(0, 2)];
     } else {
-        // 🎯 普通升级商店：打乱后，只允许在普通池子里切 3 个，史诗装备绝不准乱入
+        // 普通升级商店：只允许抽取 3 个普通词条，史诗机制绝不乱入
         const shuffledNormals = [...normals].sort(() => 0.5 - Math.random());
         selectedItems = shuffledNormals.slice(0, 3);
     }
@@ -235,10 +258,12 @@ function triggerShop(isBossShop = false) {
         const card = document.createElement("div");
         card.className = "shop-card";
         
-        // 🚀 动态显示当前的弹道加成情况
         let displayDesc = item.desc;
         if (item.id === "shotgun" && player.gunType === "shotgun") {
             displayDesc = `使当前的散弹枪攻击弹道数进化至：${player.baseProjectiles + 1} 发！`;
+        }
+        if (item.id === "epic_nova" && player.isNova) {
+            displayDesc = `使暴击时迸发出的全向弹道数进化至：${player.novaProjectiles + 1} 发！`;
         }
 
         card.innerHTML = `
@@ -246,14 +271,34 @@ function triggerShop(isBossShop = false) {
             <div class="item-desc">${displayDesc}</div>
         `;
         
+        // 核心交互改动：支持多次点击选购
         card.addEventListener("click", () => {
-            item.effect();
+            // 如果这张卡片已经被点过，防止玩家无脑重复刷单张卡
+            if (card.style.opacity === "0.4") return;
+
+            item.effect(); // 执行加成效果
+            selectedCount++; // 已购买额度递增
+            
+            // 实时刷新顶部血条和等级看板数据
             document.getElementById("hp").innerText = `生命值: ${Math.floor(player.hp)}/${player.maxHp}`;
             document.getElementById("level").innerText = `等级: ${level} (EXP: ${exp}/${expNeeded})`;
             
-            modal.classList.add("hidden");
-            isPaused = false;
-            gameLoop();
+            // 购买过的卡片在视觉上变淡，并剥夺其后续重复点击的资格
+            card.style.opacity = "0.4";
+            card.style.pointerEvents = "none";
+            card.style.borderColor = "#7f8c8d";
+
+            // 🚀 核心判定：只有当购买次数达到了设定的配额（普通1次，5整倍数/Boss店2次）后，才允许关闭商店
+            if (selectedCount >= maxSelect) {
+                modal.classList.add("hidden");
+                isPaused = false;
+                gameLoop(); // 恢复游戏物理主循环
+            } else {
+                // 如果是三选二且刚点了第 1 个，更新一下标题提示玩家继续点第 2 个
+                if (shopTitle) {
+                    shopTitle.innerHTML = `🎉 还可再选择 <span style="color: #e74c3c; font-size: 24px;">1</span> 项强化：`;
+                }
+            }
         });
         container.appendChild(card);
     });
@@ -263,21 +308,17 @@ function triggerShop(isBossShop = false) {
 
 // 9. 🚀 变异刷怪与无尽波次进化核心算法
 let enemyTimer = 0;
-let bossActive = false; // 全局追踪场上是否有 Boss
+let bossActive = false; 
 
 function spawnEnemies() {
     enemyTimer++;
-    
-    // 根据总击杀数计算当前应该处于第几轮大循环（每 60 斩为一个 Loop）
     currentLoop = 1 + Math.floor(score / 60);
 
-    // 🚀 【阶段 A：Boss 降临判定】
-    // 🚀 重构：安全冷却区判定。每当击杀完上一个 Boss 后，再次亲手斩杀 50 只怪物，才会激活下一个 Boss
-    // 这样彻底避免了线性倍数导致的上一个还没打完，下一个就重叠刷新的 BUG
+    // 🚀 Boss 安全冷却区判定：斩杀 50 只怪物触发下一代 Boss
     if (lastBossKills > 0) {
         killsSinceLastBoss = score - lastBossKills;
     } else {
-        killsSinceLastBoss = score; // 第一只 Boss 依然按初始累计计算
+        killsSinceLastBoss = score; 
     }
 
     const shouldSpawnBoss = (killsSinceLastBoss >= 50);
@@ -288,14 +329,13 @@ function spawnEnemies() {
             y: -40,
             size: 40, 
             speed: 1.0, 
-            hp: 120 * bossCounter, // 随着代数增加，Boss 血量阶梯式成长
+            hp: 120 * bossCounter, 
             maxHp: 120 * bossCounter,
             color: "#9b59b6",
-            generation: bossCounter // 记录是第几代 Boss
+            generation: bossCounter
         });
         bossActive = true;
         
-        // 🚀 重构：获取顶部血条 UI 并改名为动态的阶梯式冠名
         const bossTitleElement = document.querySelector(".boss-title");
         if (bossTitleElement) {
             bossTitleElement.innerText = `⚠️ 警告：第 ${bossCounter} 轮 · 灾变恶魔宿主 ⚠️`;
@@ -308,11 +348,9 @@ function spawnEnemies() {
         updateBossBar(100, 100);
     }
 
-    // 🚀 【阶段 B：普通怪与精英怪的高频刷新控制】
-    // 刷怪频率会随着等级增加而稍微变快
+    // 🚀 普通怪与精英怪刷新
     if (enemyTimer > Math.max(12, 45 - level * 2)) {
         let x, y;
-        // 四周边缘随机点出场
         if (Math.random() < 0.5) {
             x = Math.random() < 0.5 ? -10 : canvas.width + 10;
             y = Math.random() * canvas.height;
@@ -321,46 +359,25 @@ function spawnEnemies() {
             y = Math.random() < 0.5 ? -10 : canvas.height + 10;
         }
 
-        // 判定当前击杀数是否解锁了精英怪（30斩以上，且30%几率随出）
         const isEliteUnlocked = (score >= 30);
         if (isEliteUnlocked && Math.random() < 0.3) {
-            // 🚀 亮蓝色精英怪属性定义
             enemies.push({
-                type: "elite",
-                x: x,
-                y: y,
-                size: 20, // 2倍体积
-                speed: 1.4 + (currentLoop * 0.1),
-                hp: 4 * currentLoop, // 血量随循环递增
-                color: "#3498db", // 亮蓝色
-                // 💡 新增变异：蓄力冲刺状态机变量
-                state: "walk", // walk=寻路移动, charge=红光蓄力, dash=暴走冲刺
-                timer: 0,
-                dashVx: 0,
-                dashVy: 0
+                type: "elite", x: x, y: y, size: 20,
+                speed: 1.4 + (currentLoop * 0.1), hp: 4 * currentLoop, color: "#3498db",
+                state: "walk", timer: 0, dashVx: 0, dashVy: 0
             });
         } else {
-            // 🚀 普通小怪属性定义
             enemies.push({
-                type: "normal",
-                x: x,
-                y: y,
-                size: 10,
-                speed: 1.2 + (currentLoop * 0.1),
-                hp: 1 + Math.floor(currentLoop / 2),
-                color: "#e74c3c", // 鲜红色
-                // 💡 新增变异：普通怪到达 Loop 2 后也拥有概率蓄力冲刺能力
-                state: "walk",
-                timer: 0,
-                dashVx: 0,
-                dashVy: 0
+                type: "normal", x: x, y: y, size: 10,
+                speed: 1.2 + (currentLoop * 0.1), hp: 1 + Math.floor(currentLoop / 2), color: "#e74c3c",
+                state: "walk", timer: 0, dashVx: 0, dashVy: 0
             });
         }
         enemyTimer = 0;
     }
 }
 
-// 10. 🚀 新增：辅助更新顶部 Boss 血条的纯前端 UI 函数
+// 10. 辅助更新顶部 Boss 血条 UI
 function updateBossBar(current, max) {
     const bar = document.getElementById("bossHpBar");
     if (bar) {
@@ -368,16 +385,17 @@ function updateBossBar(current, max) {
         bar.style.width = percentage + "%";
     }
 }
-// 11. 🚀 核心物理碰撞、蓄力红绿灯AI与分裂算法主循环
+// 11. 🚀 核心游戏主循环（前半段：物理、命中与超上限穿透判定）
 function gameLoop() {
     if (gameOver || isPaused) return;
 
+    // 清空画布
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     updatePlayer();
     spawnEnemies();
 
-    // 【逻辑 A】绘制并拾取经验石（普通=1点，精英爆金/大绿=3点）
+    // 【逻辑 A】经验石绘制与磁性吸附
     for (let i = gems.length - 1; i >= 0; i--) {
         let gem = gems[i];
         ctx.fillStyle = gem.color || "#2ecc71";
@@ -393,20 +411,50 @@ function gameLoop() {
 
         if (d < player.size + gem.size) {
             gems.splice(i, 1);
-            exp += gem.value; // 根据宝石权值加经验
+            exp += gem.value;
             
             if (exp >= expNeeded) {
+                // 🚀 核心重构：升级时的动态生命体感反馈机制
+                if (player.hp >= player.maxHp) {
+                    // 情况 A：血条是满的 ──> 永久增加【当前等级数】的生命上限
+                    // 例如：1级升2级满血，上限+1；6级升7级满血，上限直接永久+6！越到后期满血越香！
+                    player.maxHp += level;
+                    player.hp = player.maxHp; // 保持满血状态
+                    
+                    // 弹出金色飘字反馈增加上限的成就感
+                    numbers.push({
+                        x: player.x, y: player.y - player.size,
+                        text: `🛡️ MAX HP +${level}!`,
+                        isCrit: true, life: 45, vx: 0, vy: -1.5
+                    });
+                } else {
+                    // 情况 B：血条不满 ──> 动态计算并立刻恢复失去血量的 20%
+                    let lostHp = player.maxHp - player.hp;
+                    let healAmount = Math.max(1, Math.floor(lostHp * 0.20)); // 保底至少回1点血
+                    
+                    player.hp = Math.min(player.maxHp, player.hp + healAmount);
+                    
+                    // 弹出绿色加血飘字反馈伤势紧急治疗
+                    numbers.push({
+                        x: player.x, y: player.y - player.size,
+                        text: `❤️ +${healAmount}`,
+                        isCrit: false, life: 35, vx: 0, vy: -1.2, isHeal: true
+                    });
+                }
+
+                // 正常执行升级、扣除经验、跨越等级和推开商店逻辑（维持原样）
                 level++;
                 exp = 0;
                 expNeeded = Math.floor(expNeeded * 1.5);
-                triggerShop();
+                triggerShop(false);
             } else {
                 document.getElementById("level").innerText = `等级: ${level} (EXP: ${exp}/${expNeeded})`;
             }
         }
+
     }
 
-    // 【逻辑 B】子弹位移与命中、Boss 血条、强行升空商店判定
+    // 【逻辑 B】子弹位移、命中判定、无限穿透矩阵、全向爆裂核心物理引擎
     for (let i = bullets.length - 1; i >= 0; i--) {
         let b = bullets[i];
         b.x += b.vx;
@@ -422,162 +470,150 @@ function gameLoop() {
             continue;
         }
 
-             // 命中敌人
         for (let j = enemies.length - 1; j >= 0; j--) {
             let e = enemies[j];
-            if (Math.hypot(b.x - e.x, b.y - e.y) < b.size + e.size) {
-                bullets.splice(i, 1);
-				
-                // 🚀 1. 核心暴击算法判定
-                let finalDamage = player.damage;
-                let isCrit = Math.random() < player.critRate;
-                if (isCrit) {
-                    finalDamage *= 2; // 暴击伤害翻倍
+			if (Math.hypot(b.x - e.x, b.y - e.y) < b.size + e.size) {
+                
+                // 🚀 核心修改：如果子弹当前基础伤害已经小于 1（彻底衰减），强制剥夺穿透和暴击能力
+                let canCritAndPierce = (b.damage < 1) ? false : true;
+
+                // 🚀 1. 核心判定：计算暴击（只有未经穿透的初始子弹/未打上非暴击标记的子弹且伤害>=1，才能概率触发暴击）
+                let finalDamage = b.damage;
+                let isCrit = false;
+                
+                if (canCritAndPierce && !b.cannotCrit) {
+                    isCrit = Math.random() < player.critRate;
+                    if (isCrit) {
+                        finalDamage *= 2; // 暴击伤害翻倍
+                    }
                 }
                 
-                // 敌人扣除最终计算后的伤害
+                // 敌人扣除当前子弹携带的最终伤害
                 e.hp -= finalDamage; 
 
-				// 🚀 2. 核心吸血算法判定（引入内置冷却时间防站撸）
-                // 只有当概率通过，且距离上一次吸血已经过去了至少 30 帧（大约 0.5 秒）时，才允许回血
-                let currentFrame = score * 10 + invincibleTimer; // 利用现有变量组合一个递增的伪时间戳
-                
-                if (Math.random() < player.leechRate && (currentFrame - player.lastLeechTime > 30)) {
-                    player.hp = Math.min(player.maxHp, player.hp + 1); 
-                    player.lastLeechTime = currentFrame; // 🚀 更新上一次成功吸血的时间，进入 0.5 秒冷却期
-                    document.getElementById("hp").innerText = `生命值: ${Math.floor(player.hp)}/${player.maxHp}`;
+                // 🚀 2. 核心机制：恶魔裂变弹头（暴击分裂子弹攻击力平均分，且永久无法穿透和暴击）
+                if (isCrit && player.isNova) {
+                    const count = player.novaProjectiles; 
+                    let startAngle = Math.random() * Math.PI; 
                     
-                    // 额外小细节：可以在数字池里飘一个绿色的 "+1" 增加回血视觉反馈
-                    numbers.push({
-                        x: player.x,
-                        y: player.y - player.size,
-                        text: "❤️ +1",
-                        isCrit: false,
-                        life: 30,
-                        vx: 0,
-                        vy: -1,
-                        isHeal: true // 标记为回血文字
-                    });
+                    // 💥 数学公式：分裂子弹的总伤害继承自这一发子弹暴击前的基础伤害（或最终伤害平均分）
+                    // 按照“攻击力平均分”规则：
+                    let splitDamage = finalDamage / count;
+
+                    for (let k = 0; k < count; k++) {
+                        let angle = startAngle + ((Math.PI * 2) / count) * k; 
+                        bullets.push({ 
+                            x: e.x, y: e.y, 
+                            vx: Math.cos(angle) * 6, vy: Math.sin(angle) * 6, 
+                            size: 3,         
+                            damage: splitDamage, // 🟢 伤害平均分
+                            pierceCount: 0,      // 🟢 裂变子弹穿透数直接锁死 0（无法穿透）
+                            cannotCrit: true     // 🚀 裂变子弹永久打上禁止暴击标记
+                        });
+                    }
                 }
 
-                // 🚀 3. 动态向数字池压入飘字对象
+                // 吸血与彩色飘字生成（维持原样，由于 finalDamage 动态衰减，飘字也会同步变小）
+                let currentFrame = score * 10 + invincibleTimer;
+                if (Math.random() < player.leechRate && (currentFrame - player.lastLeechTime > 30)) {
+                    player.hp = Math.min(player.maxHp, player.hp + 1); 
+                    player.lastLeechTime = currentFrame;
+                    document.getElementById("hp").innerText = `生命值: ${Math.floor(player.hp)}/${player.maxHp}`;
+                    numbers.push({ x: player.x, y: player.y - player.size, text: "❤️ +1", isCrit: false, life: 30, vx: 0, vy: -1, isHeal: true });
+                }
+
                 numbers.push({
-                    x: e.x,
-                    y: e.y - e.size, // 在怪物的正头顶生成
-                    text: isCrit ? `💥 ${finalDamage}!` : finalDamage, // 暴击文字带爆炸符号
-                    isCrit: isCrit,
-                    life: 40, // 文字在空中存活的帧数
-                    vx: (Math.random() * 2 - 1) * 0.5, // 随机轻微左右横移
-                    vy: -1.2 // 缓缓向上飘升
+                    x: e.x, y: e.y - e.size,
+                    text: isCrit ? `💥 ${Math.floor(finalDamage)}!` : Math.floor(finalDamage),
+                    isCrit: isCrit, life: 40, vx: (Math.random() * 2 - 1) * 0.5, vy: -1.2
                 });
 
-                // 如果击中 Boss，实时更新顶部大血条
                 if (e.type === "boss") {
                     updateBossBar(e.hp, e.maxHp);
                 }
 
-                // 怪物死亡判定
+                // 怪物死亡判定链（维持原样）
                 if (e.hp <= 0) {
-					if (e.type === "boss") {
-                        // 🟢 [🚀 重构后的 Boss 斩首狂欢处理]
-                        bossActive = false;
-                        lastBossKills = score; // 关键：记录当前击杀数，为下一只 Boss 开启 50 斩安全冷却区
-                        bossCounter++;         // 关键：Boss 代数递增
-                        
+                    if (e.type === "boss") {
+                        bossActive = false; lastBossKills = score; bossCounter++;         
                         const bossContainer = document.getElementById("bossHealthContainer");
-                        if (bossContainer) {
-                            bossContainer.classList.add("hidden");
-                        }
-                        
-                        // 🚀 奖励1：原地爆散出 20 颗高额金色大宝石
+                        if (bossContainer) bossContainer.classList.add("hidden");
                         for (let k = 0; k < 20; k++) {
-                            gems.push({ 
-                                x: e.x + (Math.random() * 60 - 30), 
-                                y: e.y + (Math.random() * 60 - 30), 
-                                size: 6, 
-                                value: 3, 
-                                color: "#f1c40f" 
-                            });
+                            gems.push({ x: e.x + (Math.random() * 60 - 30), y: e.y + (Math.random() * 60 - 30), size: 6, value: 3, color: "#f1c40f" });
                         }
-
-                        // 🚀 奖励2：赋予土豆主角 3 秒钟的“黄金无敌暴走状态”（3秒 = 180帧）
-                        invincibleTimer = 180;
-                        player.color = "#f1c40f"; // 全身变成纯金色
-
-                        // 🚀 奖励3：强制拉入商店，并在第四部分中锁定稀有道具权重
-                        setTimeout(() => { triggerShop(true); }, 20); // 传入 true 代表这是 Boss 专属特殊商店
-                        
+                        invincibleTimer = 180; player.color = "#f1c40f"; 
+                        setTimeout(() => { triggerShop(true); }, 20); 
                     } else if (e.type === "elite") {
-                        // 🟢 [精英怪死亡处理] 爆金宝石 + 🚀 触发分裂出 2 只高移速小蜘蛛
                         gems.push({ x: e.x, y: e.y, size: 6, value: 3, color: "#f1c40f" }); 
-                        
                         for (let k = 0; k < 2; k++) {
-                            enemies.push({
-                                type: "spider",
-                                x: e.x + (k === 0 ? -10 : 10),
-                                y: e.y,
-                                size: 6, // 极小体积
-                                speed: 2.8, // 速度极快
-                                hp: 1, // 1血脆皮，但速度具威胁
-                                color: "#e67e22" // 橘色蜘蛛
-                            });
+                            enemies.push({ type: "spider", x: e.x + (k === 0 ? -10 : 10), y: e.y, size: 6, speed: 2.8, hp: 1, color: "#e67e22" });
                         }
                     } else {
-                        // 普通怪和小蜘蛛死亡，正常掉落普通绿宝石
                         gems.push({ x: e.x, y: e.y, size: 4, value: 1, color: "#2ecc71" });
                     }
-
-                    enemies.splice(j, 1);
-                    score++;
+                    enemies.splice(j, 1); score++;
                     document.getElementById("score").innerText = "击杀数: " + score;
+                }
+
+                // 🚀 3. 核心机制：硬核穿透矩阵判定（穿透与暴击互斥，且穿透后只能有概率穿透，伤害每穿一次衰减一半）
+                if (isCrit) {
+                    // 🟢 规则一：穿透和暴击不能同时触发。如果子弹这一发出了暴击，强制剥夺后续穿透权，直接销毁！
+                    bullets.splice(i, 1);
+                } else if (canCritAndPierce) {
+                    // 如果没出暴击，判定子弹穿透生命周期
+                    if (b.pierceCount === -1) {
+                        // 首次撞击：动态解算一生的穿透次数
+                        let totalChance = player.pierceChance;
+                        let basePierce = Math.floor(totalChance); 
+                        let remChance = totalChance - basePierce; 
+                        b.pierceCount = basePierce + (Math.random() < remChance ? 1 : 0);
+                    }
+
+                    if (b.pierceCount > 0) {
+                        b.pierceCount--;      // 消耗一次穿透机会
+                        b.damage *= 0.5;      // 🟢 规则二：穿透子弹伤害每穿透一次，攻击力衰减一半！
+                        b.cannotCrit = true;  // 🟢 规则三：穿透后的子弹只能继续有概率穿透，永久无法触发暴击
+                    } else {
+                        bullets.splice(i, 1); // 穿透数用尽，销毁
+                    }
+                } else {
+                    // 伤害已经小于1，无法穿透，直接销毁
+                    bullets.splice(i, 1);
                 }
                 break;
             }
         }
     }
-
-    // 【逻辑 C】怪物 AI 状态机更新（蓄力红绿灯控制）与伤害判定
+    // 【逻辑 C】敌人追踪、蓄力状态机与伤害判定
     for (let i = enemies.length - 1; i >= 0; i--) {
         let e = enemies[i];
         
         if (e.type === "boss" || e.type === "spider") {
-            // Boss和蜘蛛不参与冲刺状态机，保持基础追踪
             let angle = Math.atan2(player.y - e.y, player.x - e.x);
             e.x += Math.cos(angle) * e.speed;
             e.y += Math.sin(angle) * e.speed;
         } else {
-            // 🚀 普通怪与精英怪的“冲刺蓄力状态机”
             e.timer++;
-            
             if (e.state === "walk") {
-                // 1. 寻路跟踪状态
                 let angle = Math.atan2(player.y - e.y, player.x - e.x);
                 e.x += Math.cos(angle) * e.speed;
                 e.y += Math.sin(angle) * e.speed;
-                
-                // 每走大约 3~4 秒，有概率触发原地蓄力
                 if (e.timer > 180 && Math.random() < 0.02) {
                     e.state = "charge";
                     e.timer = 0;
                 }
             } else if (e.state === "charge") {
-                // 2. 原地蓄力状态（此时怪完全锁死不能动，外观渲染红光警示）
-                e.timer++;
-                // 锁定冲刺发射的方向向量
                 let angle = Math.atan2(player.y - e.y, player.x - e.x);
-                e.dashVx = Math.cos(angle) * (e.speed * 3.5); // 冲刺速度提高数倍
+                e.dashVx = Math.cos(angle) * (e.speed * 3.5); 
                 e.dashVy = Math.sin(angle) * (e.speed * 3.5);
-
-                if (e.timer > 35) { // 蓄力持续约 0.5 秒
+                if (e.timer > 35) { 
                     e.state = "dash";
                     e.timer = 0;
                 }
             } else if (e.state === "dash") {
-                // 3. 极速冲刺状态（顺着向量向前滑行，不修正方向）
                 e.x += e.dashVx;
                 e.y += e.dashVy;
-                
-                if (e.timer > 20) { // 冲刺滑行约 0.3 秒后力竭
+                if (e.timer > 20) { 
                     e.state = "walk";
                     e.timer = 0;
                 }
@@ -589,7 +625,7 @@ function gameLoop() {
         ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
         
         if (e.state === "charge") {
-            ctx.fillStyle = "#ffffff"; // 蓄力时发出危险白/红闪烁（Canvas用亮白色突出）
+            ctx.fillStyle = "#ffffff"; 
             ctx.strokeStyle = "#ff0000";
             ctx.lineWidth = 3;
             ctx.stroke();
@@ -598,9 +634,28 @@ function gameLoop() {
         }
         ctx.fill();
 
-        // 玩家触敌扣血判定
+		// 玩家触敌扣血与 🚀 黄金金身反伤/秒杀拦截判定
         if (Math.hypot(player.x - e.x, player.y - e.y) < player.size + e.size) {
-            // 冲刺状态下的怪对玩家造成双倍撞击伤害
+            
+            if (invincibleTimer > 0) {
+                // 🚀 核心修改：无敌金身期间，碰到的任何怪血量直接强制归 0（瞬间秒杀！）
+                e.hp = 0; 
+                
+                // 同时，为了让秒杀更有打击反馈，我们顺手在被你撞死的怪头顶爆出一个金色的“CRUSH!”数字字样
+                numbers.push({
+                    x: e.x,
+                    y: e.y - e.size,
+                    text: "💥 CRUSH!",
+                    isCrit: true, // 借用暴击的金色描边红字特效，视觉拉满
+                    life: 25,     // 飘字存活稍微短一点，显得更迅猛
+                    vx: (Math.random() * 4 - 2), // 被撞飞的随机左右横移
+                    vy: -2        // 快速向上飘升
+                });
+                
+                continue; // 拦截退出，不扣玩家血量，并且逻辑向后走会触发怪物的死亡判定和掉落
+            }
+
+            // 正常状态下的扣血逻辑维持原样（无需变动）：
             let damageFactor = (e.state === "dash") ? 1.0 : 0.5;
             player.hp -= damageFactor;
             
@@ -613,87 +668,72 @@ function gameLoop() {
         }
     }
 	
-	// 🚀 4. 新增增量逻辑：更新并绘制伤害数字飘字池
+    // 【逻辑 D】更新并绘制伤害数字飘字
     for (let i = numbers.length - 1; i >= 0; i--) {
         let n = numbers[i];
-        
-        // 物理位移与生命递减
         n.x += n.vx;
         n.y += n.vy;
         n.life--;
 
-        // 计算文字半透明淡出效果
         let alpha = n.life / 40;
         ctx.save();
         
         if (n.isCrit) {
-            // 🎯 暴击大数字：带有红色高亮、金色加粗描边和震撼感
             ctx.font = `bold 18px sans-serif`;
-            ctx.fillStyle = `rgba(231, 76, 60, ${alpha})`; // 鲜红色
-            ctx.strokeStyle = `rgba(241, 196, 15, ${alpha})`; // 金色边缘
+            ctx.fillStyle = `rgba(231, 76, 60, ${alpha})`; 
+            ctx.strokeStyle = `rgba(241, 196, 15, ${alpha})`; 
             ctx.lineWidth = 2;
             ctx.textAlign = "center";
             ctx.strokeText(n.text, n.x, n.y);
             ctx.fillText(n.text, n.x, n.y);
         } else {
-			// 🏳️ 普通小数字：基础白色、精简小巧
             ctx.font = "13px sans-serif";
-            
-            // 🚀 核心修复：如果是加血文字，颜色变为醒目的翠绿色，否则保持纯白
             ctx.fillStyle = n.isHeal ? `rgba(46, 204, 113, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
-            
             ctx.textAlign = "center";
             ctx.fillText(n.text, n.x, n.y);
         }
-        
         ctx.restore();
 
-        // 当文字生命值归零（飞到足够高且完全透明时），从内存中彻底释放
         if (n.life <= 0) {
             numbers.splice(i, 1);
         }
     }
 
-    // 🚀 处理玩家击杀 Boss 后的 3 秒暴走状态时间线
+    // 处理玩家击杀 Boss 后的 3 秒暴走状态时间线
     if (invincibleTimer > 0) {
         invincibleTimer--;
-        player.color = "#f1c40f"; // 强制黄金色闪烁
-        // 在无敌期间，由于你处于“黄金超载”，如果还是手枪，射速强行提升到极致加速割草
+        player.color = "#f1c40f"; 
         if (player.gunType === "pistol") {
-            player.shootTimer += 2; // 变相加快手枪开火频率
+            player.shootTimer += 2; 
         }
         if (invincibleTimer <= 0) {
-            player.color = "#f39c12"; // 状态结束，变回土豆黄
+            player.color = "#f39c12"; 
         }
     }
 
-	// 【逻辑 D】绘制土豆主角与 🚀 增强无敌暴走特效
+    // 🚀 绘制土豆主角与增强无敌暴走特效
     if (invincibleTimer > 0) {
-        // 1. 动态计算扩散光环的半径（利用 invincibleTimer 制造循环向外扩散的波纹效果）
-        // 每过 30 帧波纹扩散一次，半径从玩家自身大小（15）扩散到最大（45）
-        let waveProgress = (invincibleTimer % 30) / 30; // 0 到 1 的进度
+        let waveProgress = (invincibleTimer % 30) / 30; 
         let auraRadius = player.size + (30 * (1 - waveProgress)); 
-        let auraAlpha = waveProgress * 0.5; // 越往外越淡
+        let auraAlpha = waveProgress * 0.5; 
         
         ctx.save();
-        ctx.strokeStyle = `rgba(241, 196, 15, ${auraAlpha})`; // 金色光环
+        ctx.strokeStyle = `rgba(241, 196, 15, ${auraAlpha})`; 
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(player.x, player.y, auraRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
         
-        // 2. 为主角本体增加一层闪烁的金色护盾边缘
         ctx.save();
         ctx.shadowColor = "#f1c40f";
         ctx.shadowBlur = 15;
-        ctx.fillStyle = "#f1c40f"; // 强制纯金实体
+        ctx.fillStyle = "#f1c40f"; 
         ctx.beginPath();
         ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     } else {
-        // 3. 正常状态下的普通土豆黄
         ctx.fillStyle = player.color;
         ctx.beginPath();
         ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
