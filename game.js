@@ -83,11 +83,14 @@ const shopItems = [
     { 
         id: "epic_vampire", 
         name: "👑 [史诗] 鲜血始祖禁术", 
-        desc: "吸血禁术觉醒：吸血概率永久大幅提升 4%！(可无限重复选择，吸血绝对上限 25%)", 
+        // 🚀 核心修改：文案和逻辑完全重构为纯粹的“击杀瞬回”，并拿掉垃圾的 ICD 冷却限制，成长微调为每次 5%
+        desc: "吸血禁术觉醒：击杀任何怪物时，永久提升 5% 的概率使自身【直接抽取生命值】！(可无限重复选择，吸血绝对上限 25%)", 
         effect: () => { 
-            player.leechRate = Math.min(0.25, player.leechRate + 0.04); 
+            // 每次大幅提升 5%，直到堆满 25% 满额吸血率为止
+            player.leechRate = Math.min(0.25, player.leechRate + 0.05); 
         } 
     }
+
 ];
 
 // 4. 游戏实体容器
@@ -677,15 +680,6 @@ function gameLoop() {
                     }
                 }
 
-                // 吸血与彩色飘字生成（维持原样，由于 finalDamage 动态衰减，飘字也会同步变小）
-                let currentFrame = score * 10 + invincibleTimer;
-                if (Math.random() < player.leechRate && (currentFrame - player.lastLeechTime > 30)) {
-                    player.hp = Math.min(player.maxHp, player.hp + 1); 
-                    player.lastLeechTime = currentFrame;
-                    document.getElementById("hp").innerText = `生命值: ${Math.floor(player.hp)}/${player.maxHp}`;
-                    numbers.push({ x: player.x, y: player.y - player.size, text: "❤️ +1", isCrit: false, life: 30, vx: 0, vy: -1, isHeal: true });
-                }
-
                 numbers.push({
                     x: e.x, y: e.y - e.size,
                     text: isCrit ? `💥 ${Math.floor(finalDamage)}!` : Math.floor(finalDamage),
@@ -744,6 +738,25 @@ function gameLoop() {
                     } else {
                         gems.push({ x: e.x, y: e.y, size: 4, value: 1, color: "#2ecc71" });
                     }
+					
+					// 🚀 核心重构：【击杀才判定吸血】。只要怪物在此刻彻底死掉，且概率摇号通过，身体直接瞬间抽血！
+                    // 彻底撕毁了之前每秒只能触发2次的内置冷却（ICD）累赘，割草有多高频，回血就有多狂暴！
+                    if (Math.random() < player.leechRate) {
+                        
+                        // 💥 数学公式：每次击杀吸血成功，直接稳稳恢复玩家当前最大生命上限的 3%（保底最少回复 2 点血）
+                        let killHealAmount = Math.max(2, Math.floor(player.maxHp * 0.03));
+                        
+                        player.hp = Math.min(player.maxHp, player.hp + killHealAmount);
+                        document.getElementById("hp").innerText = `生命值: ${Math.floor(player.hp)}/${player.maxHp}`;
+                        
+                        // 伴随着怪物的暴毙，原地立刻冲天飘起翠绿色的治愈飘字反馈！
+                        numbers.push({ 
+                            x: e.x, y: e.y - e.size, // 直接从怪物死去的尸体位置飘起
+                            text: `💚 +${killHealAmount}`, 
+                            isCrit: false, life: 30, vx: 0, vy: -1, isHeal: true 
+                        });
+                    }
+
                     enemies.splice(j, 1); score++;
                     document.getElementById("score").innerText = "击杀数: " + score;
                 }
